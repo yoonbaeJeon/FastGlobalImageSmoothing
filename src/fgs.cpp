@@ -8,12 +8,22 @@ using std::vector;
 using std::chrono::system_clock;
 using std::chrono::duration;
 
+#define CVPLOT_HEADER_ONLY
+#include "CvPlot/cvplot.h"
+
 #ifndef uchar
 typedef unsigned char uchar;
 #endif
 
 #define SQ(x) ((x)*(x))
 #define DATA_TYPE float
+#define DEPTH_SCALE 10.F
+#define DEPTH_OFFSET -5.F
+
+// Graph attrbs
+#define GRAPH_WIDTH 1400
+#define GRAPH_HEIGHT 600
+#define SPECIFIC_ROW 100
 
 class Timer {
 private:
@@ -256,10 +266,44 @@ void FGS_simple(
 	}	//iter	
 }
 
+void getBinaryData(std::vector<float>& vec, const char* data_path)
+{
+	FILE* fp = fopen(data_path, "rb");
+	int32_t count = vec.size();
+	if (data_path != nullptr) {
+		fread(&vec[0], sizeof(float), count, fp);
+	}
+	fclose(fp);
+}
+
+void convertDisparityToDepth(Mat &disparityMat, Mat &depthMat)
+{
+	if (depthMat.empty())
+	{
+		depthMat = Mat(disparityMat.size(), disparityMat.type());
+	}
+	depthMat = (1.F / disparityMat) * DEPTH_SCALE + DEPTH_OFFSET;
+}
+
+void getGraphAtRow(Mat &input, Mat &output, int row)
+{
+	std::vector<double> row_vec;
+	row_vec.resize(input.cols);
+
+	for (int i = 0; i < input.cols; i++)
+	{
+		row_vec[i] = static_cast<double>(input.ptr<float>(row)[i]);
+	}
+	auto axes = CvPlot::plot(row_vec, "-");
+	output = axes.render(GRAPH_HEIGHT, GRAPH_WIDTH);
+}
+
 int main(int argc, char* argv[])
 {
-	const char* usage = { "fgs.exe [input image path] [guidance image path]\n" };
-	std::string input_img_path("input.exr");
+	const int width = 960;
+	const int height = 480;
+	const char* usage = { "fgs.exe [input data] [guidance data]\n" };
+	std::string input_img_path("0.dat");
 	std::string guidance_img_path;
 	if (argc > 3)
 	{
@@ -276,58 +320,69 @@ int main(int argc, char* argv[])
 		input_img_path = argv[1];
 	}
 
-	// input image
-	Mat img = imread(input_img_path, IMREAD_ANYCOLOR | IMREAD_ANYDEPTH);
+	// input data
+	std::vector<float> input_data;
+	input_data.resize(width * height);
+	getBinaryData(input_data, input_img_path.data());
 
-	// guide image
-	Mat guidance_img;
+	// input image(disparity)
+	Mat img = Mat(cv::Size(width, height), CV_32F, input_data.data());
+	Mat img_depth, img_depth_graph;
+	convertDisparityToDepth(img, img_depth);
+
+	// guide data
+	std::vector<float> guidance_data;
 	if (guidance_img_path.empty() == false)
 	{
-		guidance_img = imread(guidance_img_path, IMREAD_ANYCOLOR | IMREAD_ANYDEPTH);
-		if (img.cols != guidance_img.cols || img.rows != guidance_img.rows || img.channels() != guidance_img.channels())
-		{
-			fprintf(stderr, "Invalid guidance image, the size of guidance image must match with that of the input image\n");
-			return -1;
-		}
+		getBinaryData(guidance_data, guidance_img_path.data());
+	}
+
+	// guidance image
+	Mat guidance_img, guidance_img_depth;
+	if (guidance_img_path.empty() == false)
+	{
+		guidance_img = Mat(cv::Size(width, height), CV_32F, guidance_data.data());
 	}
 
 	// output image
-	Mat output = Mat(img.size(), img.type());
+	Mat output = Mat(cv::Size(width, height), CV_32F);
 
 	// common attrbs
-	int width = img.cols;
-	int height = img.rows;
-	int channels = img.channels();
+	int channels = 1;
 
 	// show input image
-	cv::imshow("input", img / 150.0); // since our depth max val is 150m
+	cv::imshow("input_disparity", img); // no need to scale, since tensor has value bet 0 ~ 1.0
+	cv::imshow("input_depth", img_depth / 150.0); // since our depth max value is 150m
+	getGraphAtRow(img_depth, img_depth_graph, SPECIFIC_ROW);
+	cv::imshow("input_depth_graph", img_depth_graph);
 	cv::waitKey(10);
 
-	// data copy: input Mat to array
+	// data copy: input data to array
 	DATA_TYPE* image_filtered = new DATA_TYPE[height * width * channels]();
-	if (img.type() == CV_32F || img.type() == CV_32FC2 || img.type() == CV_32FC3 || img.type() == CV_32FC4) {
-		memcpy(image_filtered, img.data, sizeof(float) * width * height * channels);
+	if (img_depth.type() == CV_32F || img_depth.type() == CV_32FC2 || img_depth.type() == CV_32FC3 || img_depth.type() == CV_32FC4) {
+		memcpy(image_filtered, img_depth.data, sizeof(float) * width * height * channels);
 	}
 	else {
-		copyUcharDataToArr(image_filtered, img.data, width, height, channels);
+		copyUcharDataToArr(image_filtered, img_depth.data, width, height, channels);
 	}
 
-	// data copy: guidance Mat to array
+	// data copy: guidance data to array
 	DATA_TYPE* image_guidance = nullptr;
 	if (guidance_img_path.empty() == false)
 	{
+		convertDisparityToDepth(guidance_img, guidance_img_depth);
 		image_guidance = new DATA_TYPE[height * width * channels]();
-		if (guidance_img.type() == CV_32F || guidance_img.type() == CV_32FC2 || guidance_img.type() == CV_32FC3 || guidance_img.type() == CV_32FC4) {
-			memcpy(image_guidance, guidance_img.data, sizeof(float) * width * height * channels);
+		if (guidance_img_depth.type() == CV_32F || guidance_img_depth.type() == CV_32FC2 || guidance_img_depth.type() == CV_32FC3 || guidance_img_depth.type() == CV_32FC4) {
+			memcpy(image_guidance, guidance_img_depth.data, sizeof(float) * width * height * channels);
 		}
 		else {
-			copyUcharDataToArr(image_guidance, guidance_img.data, width, height, channels);
+			copyUcharDataToArr(image_guidance, guidance_img_depth.data, width, height, channels);
 		}
 	}
 	
 	// params
-	DATA_TYPE sigma = 0.035f;
-	DATA_TYPE lambda = SQ(10.f);
+	DATA_TYPE sigma = 0.015f;
+	DATA_TYPE lambda = SQ(5.f);
 	int solver_iteration = 2;
 	DATA_TYPE solver_attenuation = 10.f; // lambda = lambda / solver_attenuation in every iteration.
 	printParams(sigma, lambda, solver_iteration, solver_attenuation);
@@ -352,16 +407,22 @@ int main(int argc, char* argv[])
 	// print elapsed time
 	fprintf(stdout, "Elapsed time: %.4f ms\n", elapsed * 1000.0);
 
+	// result mat for saving output
+	Mat result_depth = Mat(img_depth.size(), img_depth.type());
+	Mat result_depth_graph;
+
 	// filtered array to Mat
-	if (img.type() == CV_32F || img.type() == CV_32FC2 || img.type() == CV_32FC3 || img.type() == CV_32FC4) {
-		memcpy(img.data, image_filtered, sizeof(float) * width * height * channels);
+	if (img_depth.type() == CV_32F || img_depth.type() == CV_32FC2 || img_depth.type() == CV_32FC3 || img_depth.type() == CV_32FC4) {
+		memcpy(result_depth.data, image_filtered, sizeof(float) * width * height * channels);
 	}
 	else {
-		copyArrToUcharData(img.data, image_filtered, width, height, channels);
+		copyArrToUcharData(result_depth.data, image_filtered, width, height, channels);
 	}
 
 	// show result
-	cv::imshow("result", img / 150.0); // since our depth max val is 150m
+	cv::imshow("result_depth", result_depth / 150.0); // since our depth max value is 150m
+	getGraphAtRow(result_depth, result_depth_graph, SPECIFIC_ROW);
+	cv::imshow("result_depth_graph", result_depth_graph);
 	cv::waitKey(0);
 
 	// release memory

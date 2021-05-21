@@ -9,7 +9,11 @@ C++ implementation of FGS(https://sites.google.com/site/globalsmoothing/)
 
   > for image read and write
 
+* [CvPlot](https://github.com/Profactor/cv-plot)
 
+  > for drawing graph (tested with [OpenCV3.4.14 release](https://opencv.org/releases/))
+
+<img align="auto" width="600" height="600" src="docs/cvplot_graph_sample.png">
 
 
 
@@ -23,7 +27,7 @@ cmake -G "Visual Studio 15 2017" -A x64 -B "build" -DCMAKE_PREFIX_PATH="YOUR_OPE
 
   > OpenCV root dir looks like this
 
-<img align="left" width="200" height="200" src="docs/opencv_root_dir.png">
+<img align="auto" width="200" height="200" src="docs/opencv_root_dir.png">
 
 
 
@@ -32,10 +36,10 @@ cmake -G "Visual Studio 15 2017" -A x64 -B "build" -DCMAKE_PREFIX_PATH="YOUR_OPE
 ### Run
 
 ```
-fgs.exe [input image path] [guidance image path]
+fgs.exe [input data path] [guidance data path]
 ```
 
-- input image path -- required
-- guidance image path -- optional
-  - if None, then input image will be used as guidance image
+- input data path -- required
+- guidance data path -- optional
+  - if None, then input data will be used as guidance data
 
